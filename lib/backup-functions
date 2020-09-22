@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+
+# - install_if_missing <pkg> <pkg> <pkg>
+#   install missing packages from provided list of packages
+#
+# - list_modified_config_files
+#   list modified configuration files installed by packages
+#
+# - diff_config_from_original
+#   diff a modified configuration file installed by a package against its original config
+#
+# - backup_config_diffs
+#   backup diffs for modified config files and store them in backup
+#
+# - restore_debian_backup
+#   install list of packages and apply config diffs from a backup
+#
+# - save_package_versions
+#   saves a list of versionned packages
+#
+# - backup_debian_system
+#   executes `save_package_versions' and `backup_config_diffs'
+#  
+# - restore_package_list
+#   installs package versions from saved list of versionned packages
+#
+# - apply_config_diffs
+#   patch system configuration files from their backup diffs
+#
+# - restore_debian_backup
+#   executes `restore_package_list' and `apply_config_diffs'
+
+set -euo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+    echo "error: insufficient privileges: You must be root to use this library" >&2
+    exit 1
+fi
+
+if [[ ${CLOUD_SHELL} == "true" ]]; then
+    mkdir -p ${HOME}/.cloudshell
+    touch ${HOME}/.cloudshell/no-apt-get-warning
+    # cloud-shell bug tests for /home/root/.cloudshell/no-apt-get-warning ...
+    mkdir -p /home/${HOME}/.cloudshell
+    touch /home/${HOME}/.cloudshell/no-apt-get-warning
+fi
+
+BACKUP_DIR="$(pwd)/backups/$(hostname).backup/"
+
+install_if_missing() {
+    packages=$@
+    missingPkgs=()
+
+    for pkg in ${packages}; do
+	if ! dpkg -s ${pkg} &> /dev/null; then
+	    missingPkgs+=(${pkg})
+	fi
+    done
+
+    if [[ ! -z "${missingPkgs[@]}" ]]; then
+	apt-get install -y -qq ${missingPkgs[@]}
+    fi
+}
+
+list_modified_config_files() {
+    # format "<filename> <checksum>" 
+    pkg_conf_chksums=$(dpkg-query -W -f='${Conffiles}\n' '*')
+    # reformat to "<checksum> <filename>"
+    checksums=$(IFS=" " awk 'OFS="  "{print $2,$1}' <<<${pkg_conf_chksums})
+    # validate checksums from formatted list
+    LANG=C md5sum -c <<<${checksums} 2>/dev/null | awk -F': ' '$2 !~ /OK/{print $1}'
+}
+
+diff_config_from_original() {
+    filename=$1
+    shift
+
+    if [[ -z "${filename}" ]]; then
+	echo "usage: diff_config_from_original <filename>"
+	return 1
+    fi
+    
+    install_if_missing \
+	apt \
+	apt-file \
+	coreutils
+
+    # fetch apt-file cache if needed
+    if ! apt-get indextargets --format '$(CREATED_BY)' | grep -q ^Contents- > /dev/null; then
+	apt-file update -v > /dev/null
+    fi
+
+    source_pkgs=($(apt-file -l search $(realpath -m "$filename"))) # array of package name(s)
+
+    if [[ ${#source_pkgs[@]} -eq 0 ]]; then
+	echo "error: unknown file origin: package not found for ${filename}" >&2
+	return 1
+    elif [[ ${#source_pkgs[@]} -gt 1 ]]; then
+	echo "error: multiple source packages found for ${filename}: " >&2
+	for spkg in ${source_pkgs[@]}; do
+	    echo " - ${spkg}"
+	done
+	return 1
+    fi
+
+    if [[ ! -d ${BACKUP_DIR} ]]; then
+	mkdir "${BACKUP_DIR}"
+    fi
+
+    cfg_dir="${BACKUP_DIR}/configs/$(dirname ${filename})"
+    tmpdir=$(mktemp -qd)
+    work_dir=$(pwd)
+
+    cd ${tmpdir}
+    mkdir -p ${cfg_dir}
+    chown _apt:root ${tmpdir}
+
+    for package in ${source_pkgs[@]}; do
+	if dpkg-query -W --showformat='${Status}\n' | grep installed > /dev/null; then
+	    apt-get download "$package" > /dev/null
+	    mkdir contents
+	    dpkg-deb -x *.deb contents/ >&2
+
+	    # package contained required file
+	    if [ -f "contents$filename" ]; then
+ 		diff -u "contents$filename" "$filename" > "${cfg_dir}/$(basename ${filename})".diff
+		ret=$?
+	    fi
+
+	    cd ${work_dir}
+	    rm -rf "$tmpdir"
+	    return $ret
+	fi
+    done
+}
+
+
+backup_config_diffs() {
+    for mod in $(list_modified_config_files); do
+	diff_config_from_original "${mod}"
+    done
+}
+	
+save_package_versions() {
+    if [[ ! -d ${BACKUP_DIR} ]]; then
+	mkdir "${BACKUP_DIR}"
+    else
+	echo "error: existing backup found in ${BACKUP_DIR}/"
+	return 1
+    fi
+    install_if_missing aptitude
+    aptitude -q -F "%?p=%?V %M" --disable-columns search \~i > "${BACKUP_DIR}/packages.list"
+}
+
+backup_debian_system() {
+    save_package_versions    
+    backup_config_diffs
+}
+
+restore_package_list() {
+    backup_dir=$1
+    shift
+    
+    package_list="${backup_dir}/packages.list"
+    if [[ ! -f "${package_list}" ]]; then
+	echo "error: no such file: ${package_list}" >&2
+	return 1
+    fi
+
+    install_if_missing aptitude
+
+    aptitude -q -R --schedule-only install $(awk < ${package_list} '{print $1}')
+    aptitude -q -R --schedule-only markauto $(awk < ${package_list} '$2=="A" {split($1,A,"=");print A[1]}')
+}
+
+apply_config_diffs() {
+    backup_dir=$1
+    shift
+    
+    diff_files=$(find "${backup_dir}" -type f -name "*.diff")
+    for diff_file in ${diff_files}; do
+	sys_file=${diff_file##*configs}
+	patch "${sys_file/.diff/}" "${diff_file}"
+    done
+}
+
+restore_debian_backup() {
+    backup_dir=$1
+    shift
+
+    if [[ ! -d "${backup_dir}" ]]; then
+	echo "error: no such directory: ${backup_dir}" >&2
+	return 1
+    fi
+
+    restore_package_list "${backup_dir}"
+    apply_config_diffs "${backup_dir}"
+}
