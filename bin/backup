@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+. "$(dirname $0)"/../lib/backup-functions
+
+backup_debian_system

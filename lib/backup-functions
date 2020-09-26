@@ -20,7 +20,7 @@
 #
 # - backup_debian_system
 #   executes `save_package_versions' and `backup_config_diffs'
-#  
+#
 # - restore_package_list
 #   installs package versions from saved list of versionned packages
 #
@@ -37,7 +37,7 @@ if [[ ${EUID} -ne 0 ]]; then
     exit 1
 fi
 
-if [[ ${CLOUD_SHELL} == "true" ]]; then
+if [[ ${CLOUD_SHELL:-} == "true" ]]; then
     mkdir -p ${HOME}/.cloudshell
     touch ${HOME}/.cloudshell/no-apt-get-warning
     # cloud-shell bug tests for /home/root/.cloudshell/no-apt-get-warning ...
@@ -63,7 +63,7 @@ install_if_missing() {
 }
 
 list_modified_config_files() {
-    # format "<filename> <checksum>" 
+    # format "<filename> <checksum>"
     pkg_conf_chksums=$(dpkg-query -W -f='${Conffiles}\n' '*')
     # reformat to "<checksum> <filename>"
     checksums=$(IFS=" " awk 'OFS="  "{print $2,$1}' <<<${pkg_conf_chksums})
@@ -79,7 +79,7 @@ diff_config_from_original() {
 	echo "usage: diff_config_from_original <filename>"
 	return 1
     fi
-    
+
     install_if_missing \
 	apt \
 	apt-file \
@@ -100,11 +100,11 @@ diff_config_from_original() {
 	for spkg in ${source_pkgs[@]}; do
 	    echo " - ${spkg}"
 	done
-	return 1
+        return 1
     fi
 
     if [[ ! -d ${BACKUP_DIR} ]]; then
-	mkdir "${BACKUP_DIR}"
+	mkdir -vp "${BACKUP_DIR}"
     fi
 
     cfg_dir="${BACKUP_DIR}/configs/$(dirname ${filename})"
@@ -134,16 +134,16 @@ diff_config_from_original() {
     done
 }
 
-
 backup_config_diffs() {
     for mod in $(list_modified_config_files); do
-	diff_config_from_original "${mod}"
+        echo "mkdir -p ${BACKUP_DIR}$(dirname ${mod})"
+	diff_config_from_original "${mod}" 
     done
 }
-	
+
 save_package_versions() {
     if [[ ! -d ${BACKUP_DIR} ]]; then
-	mkdir "${BACKUP_DIR}"
+	mkdir -p "${BACKUP_DIR}"
     else
 	echo "error: existing backup found in ${BACKUP_DIR}/"
 	return 1
@@ -153,14 +153,31 @@ save_package_versions() {
 }
 
 backup_debian_system() {
-    save_package_versions    
+    save_package_versions
     backup_config_diffs
+}
+
+archive_backup() {
+    for backup in backups/*; do
+        rel_path=backups/${backup}
+        if [[ -f ${backup}.tar ]]; then
+            continue
+        fi
+        tar -Ipigz \
+            -cf backups/${backup}.tar \
+            backups/${backup}
+    done
+}
+
+archive_emacs_conf() {
+    return 1
+    # tar -Ipigz -cf ...
 }
 
 restore_package_list() {
     backup_dir=$1
     shift
-    
+
     package_list="${backup_dir}/packages.list"
     if [[ ! -f "${package_list}" ]]; then
 	echo "error: no such file: ${package_list}" >&2
@@ -176,7 +193,7 @@ restore_package_list() {
 apply_config_diffs() {
     backup_dir=$1
     shift
-    
+
     diff_files=$(find "${backup_dir}" -type f -name "*.diff")
     for diff_file in ${diff_files}; do
 	sys_file=${diff_file##*configs}

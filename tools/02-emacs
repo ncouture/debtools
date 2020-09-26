@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ -d ~/.emacs.d ]]; then
+   echo "error: remove ~/.emacs.d manually before executing this script"
+   exit 1
+fi
+
+gh repo clone purcell/emacs.d ~/.emacs.d
+
+# emacs configuration files
+data_dir="$(dirname $0)/data)"
+pushd ${data_dir}
+cp -v init-*.el ~/.emacs.d/lisp/
+cp -v .signature .xface ~/.emacs.d/
+cp -v color-theme-julie.el ~/.emacs.d/color-theme-julie.el
+cp -v .xface .signature ~/
+if [[ ! -f "~/.emacs.d/custom.el" ]]; then
+    cp -v custom.el ~/.emacs.d/
+fi
+popd
+
+# yasnippet-terraform
+mkdir -p ~/.emacs.d/snippets
+pushd ~/.emacs.d/snippets
+git init
+git pull --progress "https://github.com/staticaland/yasnippet-terraform"
+popd
+
+# modify the default init.el file in purcell's emacs.d
+sed -i "s#(require 'init-org)#(require 'init-org-mode)#g" ~/.emacs.d/init.el
+sed -i "s#(require 'init-python)#(require 'init-elpy)#g" ~/.emacs.d/init.el
+
+# insert the following lines in ~/.emacs.d/init.el
+# (require 'init-yasnippet)
+# (require 'init-gnus)
+# (require 'init-multi-cursors)
+# (require 'init-settings)
+# (require 'init-color-theme-julie)
+# (color-theme-julie)
+# (color-theme-sanityinc-tomorrow-bright)
+sed -i "s#(provide 'init)#(require 'init-yasnippet)\n(require 'init-gnus)\n(require 'init-multi-cursors)\n(require 'init-settings)\n(require 'init-color-theme-julie)\n(color-theme-julie)\n(color-theme-sanityinc-tomorrow-bright)\n(provide 'init)#g" \
+    ~/.emacs.d/init.el
+
+pushd ${data_dir}
+cp -v authinfo[.gpg] ~/.authinfo
+cp -v emacs.profile.firejail ~/.emacs.d/emacs.profile  # firejail profile for emacs
+popd

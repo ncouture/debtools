@@ -1,0 +1,4 @@
+#!/bin/bash
+
+latest_tag=$(git ls-remote --tags https://github.com/nvm-sh/nvm/ | awk -v FS='/' '{ print $3 }' | sort  --version-sort | egrep -v '\^\{\}$' | tail -1)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/${latest_tag}/install.sh | bash
