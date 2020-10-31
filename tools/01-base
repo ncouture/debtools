@@ -20,17 +20,19 @@ sudo apt install -y \
      scdaemon \
      w3m
 
-# configure GPG
-mkdir -p ~/.gnupg/ 2> /dev/null
-if ! grep 'enable-ssh-support' ~/.gnupg/gnupg.conf; then
-    echo "enable-ssh-support" > ~/.gnupg/gnupg.conf
-fi
+# TODO: gpg2 adjustments wih pass
 
-data_dir="$(dirname $0)/data"
-cp -v "${data_dir}"/gpg-agent* ~/.gnupg/
-if ! grep gpg-agent-init.sh ~/.bashrc; then
-    echo './gpg-agent-init.sh' > ~/.bashrc
-fi
+# configure GPG
+# mkdir -p ~/.gnupg/ 2> /dev/null
+# if ! grep 'enable-ssh-support' ~/.gnupg/gnupg.conf; then
+#     echo "enable-ssh-support" > ~/.gnupg/gnupg.conf
+# fi
+
+# data_dir="$(dirname $0)/data/"
+# cp -v "${data_dir}"/gpg-agent* ~/.gnupg/
+# if ! grep gpg-agent-init.sh ~/.bashrc; then
+#     echo './gpg-agent-init.sh' > ~/.bashrc
+# fi
 
 sudo systemctl --user --global enable \
      dirmngr.socket \
